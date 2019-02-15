@@ -1,0 +1,118 @@
+# -*- encoding:utf-8 -*-
+"""
+    author:cyj
+"""
+from pymongo import MongoClient
+import numpy as np
+from scipy.sparse import identity
+import pprint
+BETA = 0.8
+
+
+class RandomProcessSimulator(object):
+    def weight_transfer(self,vector):
+        while 1:
+            vector = np.dot(vector , self.browserPTM+self.classTransferVector)
+            yield vector
+
+
+    def convergence(self):
+        iterator = self.weight_transfer(self.initWeightVector)
+        for i in range(20):
+            print iterator.next()
+
+
+    def updatePopularity(self):
+        iterator = self.weight_transfer(self.initWeightVector)
+        for i in range(20):
+            iterator.next()
+        self.popularity_list = iterator.next()
+        i = 0
+        items_json = []
+        conn = MongoClient('hostname', 27017)
+        db = conn.test
+        # db.authenticate('your', 'yourpw')
+        shared = db.shared
+        shared.update_many({'state': 1}, {'$set': {'popularity': 0}})
+        for k,v in self.distinct_shares.items():
+            item = {'filter':{'user_id': k}, 'popularity':{'popularity':self.popularity_list[i]}}
+            items_json.append(item)
+            shared.update(item['filter'], {'$set': item['popularity']})
+            i+=1
+        print items_json
+        print len(items_json)
+
+
+    def __init__(self):
+        # ProbabilityTransferMatrix == PTM
+        '''
+        e.g.
+        self.browserPTM = [\
+                      [0, float(1) / 3, float(1) / 3, float(1) / 3],\
+                      [float(1) / 2, 0, 0, float(1) / 2],\
+                      [1, 0, 0, 0],\
+                      [0, float(1) / 2, float(1) / 2, 0]\
+                      ]
+        '''
+        conn = MongoClient('hostname', 27017)
+        db = conn.test
+        # db.authenticate('your', 'yourpw')
+        shares_statistics = db.shares_statistics
+        # shares_statistics = db.chat_statistics
+        distinct_shares = {}
+        norm = 0
+        mapping = {}
+        for visit in shares_statistics.find({}):
+            user_id = visit['user_id']
+            other_id = visit['other_id']
+            if not distinct_shares.has_key(user_id):
+                distinct_shares[user_id] = 0
+                norm += 1
+            if not distinct_shares.has_key(other_id):
+                distinct_shares[other_id] = 1
+                norm += 1
+            else:
+                distinct_shares[other_id] += 1
+
+            if not mapping.has_key(user_id):
+                mapping[user_id] = {other_id: 1}
+            else:
+                if not mapping[user_id].has_key(other_id):
+                    mapping[user_id][other_id] = 1
+                else:
+                    mapping[user_id][other_id] += 1
+        # df = pandas.DataFrame(mapping).T.fillna(0)
+        self.distinct_shares = distinct_shares
+        distinct_list = list(distinct_shares)
+        print len(distinct_list)
+        # bPTM = [[float(mapping[i][j])/len(mapping[i]) if mapping.has_key(i) and mapping[i].has_key(j) else 0 for j in distinct_list]for i in distinct_list]
+        # i != j remove self browse
+        bPTM = [
+            [float(1) / len(mapping[i]) if mapping.has_key(i) and mapping[i].has_key(j) and i!=j else 0 for j in distinct_list]
+            for i in distinct_list]
+        self.browserPTM = np.dot(bPTM, BETA)
+        # pprint.pprint(self.browserPTM)
+        self.initWeightVector = [float(1) for _ in distinct_list]
+        # print self.initWeightVector
+        self.classTransferVector = [[float(1)/norm if sum(bPTM[i])==0 else float(1)*(1-BETA)/norm for _ in range(norm)] for i in range(norm)]
+        # print self.classTransferVector
+        # self.e = identity(norm).toarray()
+        # print self.e
+        
+    def plot(self):
+        import matplotlib.pyplot as plt
+        import matplotlib
+        
+        matplotlib.rcParams['font.sans-serif'] = ['SimHei']  # 用黑体显示中文
+        matplotlib.rcParams['axes.unicode_minus'] = False  # 正常显示负号
+        
+        print self.popularity_list
+        plt.hist(self.popularity_list, bins=100, normed=0, facecolor="blue", edgecolor="black", alpha=0.7)
+        plt.xlabel(u"区间")
+        plt.ylabel(u"频数/频率")
+        plt.title(u"频数/频率分布直方图")
+        plt.show()
+
+RandomProcessSimulator = RandomProcessSimulator()
+RandomProcessSimulator.updatePopularity()
+RandomProcessSimulator.plot()
